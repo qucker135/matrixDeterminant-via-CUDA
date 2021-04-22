@@ -10,25 +10,20 @@ using namespace std;
 
 
 __global__ void vectorAdd(int* a, int* b, int* c, int n) {
-	int tid = blockIdx.x * blockDim.x + threadIdx.x;//Calculate index (thread ID 
-	//)(warps->blocks->grid structure)
-
-	//Make sure we stay in-bounds
+	int tid = blockIdx.x * blockDim.x + threadIdx.x;
 	if(tid < n)
 		c[tid] = a[tid] + b[tid];
-
 }
 
 __global__ void matrixMul(int* m, int* n, int* p, int ns) {
-	//Calculate Row and Column
 	int row = blockIdx.y * blockDim.y + threadIdx.y;
 	int column = blockIdx.x * blockDim.x + threadIdx.x;
 
 	int p_sum = 0;
-	for (int i = 0; i < ns; i++) {
-		p_sum += n[row * ns + i] * n[i * ns + column];
+	if(row<ns && column<n) {
+		for (int i = 0; i < ns; i++) {
+		p_sum += m[row * ns + i] * n[i * ns + column];
 	}
-
 	p[row * ns + column] = p_sum;
 }
 
