@@ -20,7 +20,7 @@ __global__ void matrixMul(int* m, int* n, int* p, int ns) {
 	int column = blockIdx.x * blockDim.x + threadIdx.x;
 
 	int p_sum = 0;
-	if(row<ns && column<n) {
+	if(row<ns && column<ns) {
 		for (int i = 0; i < ns; i++) {
 		p_sum += m[row * ns + i] * n[i * ns + column];
 	}
