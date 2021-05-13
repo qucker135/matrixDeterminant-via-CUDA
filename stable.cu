@@ -107,11 +107,14 @@ public:
 		double mainDet = det();
 		if(mainDet == 0.0 || mainDet == -0.0) throw "Wyznacznik macierzy rowny zero!";
 		Matrix result = Matrix(M,N);
-		for(unsigned i=0;i<M;i++){
-			for(unsigned j=0;j<N;j++){
-				double detElement = (((i%2)+(j%2))%2==0?1.0:-1.0)*minor(i,j).det();
+		if(M==1) result.set(0,0,1.0/mainDet);
+		else{
+			for(unsigned i=0;i<M;i++){
+				for(unsigned j=0;j<N;j++){
+					double detElement = (((i%2)+(j%2))%2==0?1.0:-1.0)*minor(i,j).det();
 
-				result.set(j,i,detElement/mainDet);
+					result.set(j,i,detElement/mainDet);
+				}
 			}
 		}
 		return result;
@@ -208,6 +211,8 @@ void mul(void* matrix1, void* matrix2, void* result){
 	}
 }
 
+
+//BLOCKS_PER_GRID * THREADS_PER_BLOCK >= N!
 
 __global__
 void detHelper(void* matrix, double* tab_helper/*, unsigned N*/){
@@ -947,20 +952,61 @@ int main(){
 				//kopia macierzy w pamieci GPU:
 				copyMatrixToGPU(d_1, matrix1);
 
+				//dynamiczne przystosowanie liczby watkow (ominiecie bledu BLOCKS_PER_GRID * THREADS_PER_BLOCK >= N!)
+				unsigned tempBLOCKS_PER_GRID = BLOCKS_PER_GRID;
+				unsigned tempTHREADS_PER_BLOCK = THREADS_PER_BLOCK;
+
+				switch(matrix1.getRows()){
+					case 1:
+					tempBLOCKS_PER_GRID=1;
+					tempTHREADS_PER_BLOCK=1;
+					break;
+					case 2:
+					tempBLOCKS_PER_GRID=1;
+					tempTHREADS_PER_BLOCK=1;
+					break;
+					case 3:
+					tempBLOCKS_PER_GRID=2;
+					tempTHREADS_PER_BLOCK=2;
+					break;
+					case 4:
+					tempBLOCKS_PER_GRID=4;
+					tempTHREADS_PER_BLOCK=4;
+					break;
+					case 5:
+					tempBLOCKS_PER_GRID=4;
+					tempTHREADS_PER_BLOCK=16;
+					break;
+					case 6:
+					tempBLOCKS_PER_GRID=8;
+					tempTHREADS_PER_BLOCK=64;
+					break;
+					default:
+					tempBLOCKS_PER_GRID = BLOCKS_PER_GRID;
+					tempTHREADS_PER_BLOCK = THREADS_PER_BLOCK;
+				}
+
 				//tablica i wskaznik pomocnicze
 				double* tab = NULL;//new double[BLOCKS_PER_GRID * THREADS_PER_BLOCK];
-				cudaMallocManaged(&tab, sizeof(double) * BLOCKS_PER_GRID * THREADS_PER_BLOCK);
-				for(unsigned i=0;i<BLOCKS_PER_GRID * THREADS_PER_BLOCK; i++) tab[i] = 0.0;
+				cudaMallocManaged(&tab, sizeof(double) * tempBLOCKS_PER_GRID * tempTHREADS_PER_BLOCK);
+				for(unsigned i=0;i<tempBLOCKS_PER_GRID * tempTHREADS_PER_BLOCK; i++) tab[i] = 0.0;
 				double w = 0.0;
 				
 				//poczatek mierzenia czasu wliczajac alokacja pamieci
 				high_resolution_clock::time_point tbk = high_resolution_clock::now();
 
-				detHelper<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(d_1, tab);
-				cudaDeviceSynchronize();
-				for(unsigned i=0;i<BLOCKS_PER_GRID*THREADS_PER_BLOCK; i++){
-					w += tab[i];	
+				//jezeli rozmiar macierzy wiekszy od jeden wywolaj kernel, oblicz wyznacznik
+				if(matrix1.getRows()>1){
+
+					detHelper<<<tempBLOCKS_PER_GRID, tempTHREADS_PER_BLOCK>>>(d_1, tab);
+					cudaDeviceSynchronize();
+					for(unsigned i=0;i<tempBLOCKS_PER_GRID*tempTHREADS_PER_BLOCK; i++){
+						w += tab[i];	
+					}
+
 				}
+				//w przeciwnym wypadku wyznacznikiem jest jedyny element macierzy
+				else w = *((double*)((unsigned*)d_1+2));
 
 				//koniec mierzenia czasu wliczajac alokacja pamieci
 				high_resolution_clock::time_point tk = high_resolution_clock::now();
@@ -1172,20 +1218,60 @@ int main(){
 				//kopia macierzy w pamieci GPU:
 				copyMatrixToGPU(d_1, matrix1);
 
+				//dynamiczne przystosowanie liczby watkow (ominiecie bledu BLOCKS_PER_GRID * THREADS_PER_BLOCK >= N!)
+				unsigned tempBLOCKS_PER_GRID = BLOCKS_PER_GRID;
+				unsigned tempTHREADS_PER_BLOCK = THREADS_PER_BLOCK;
+
+				switch(matrix1.getRows()){
+					case 1:
+					tempBLOCKS_PER_GRID=1;
+					tempTHREADS_PER_BLOCK=1;
+					break;
+					case 2:
+					tempBLOCKS_PER_GRID=1;
+					tempTHREADS_PER_BLOCK=1;
+					break;
+					case 3:
+					tempBLOCKS_PER_GRID=2;
+					tempTHREADS_PER_BLOCK=2;
+					break;
+					case 4:
+					tempBLOCKS_PER_GRID=4;
+					tempTHREADS_PER_BLOCK=4;
+					break;
+					case 5:
+					tempBLOCKS_PER_GRID=4;
+					tempTHREADS_PER_BLOCK=16;
+					break;
+					case 6:
+					tempBLOCKS_PER_GRID=8;
+					tempTHREADS_PER_BLOCK=64;
+					break;
+					default:
+					tempBLOCKS_PER_GRID = BLOCKS_PER_GRID;
+					tempTHREADS_PER_BLOCK = THREADS_PER_BLOCK;
+				}
+
+
 				//tablica i wskaznik pomocnicze
 				double* tab = NULL;//new double[BLOCKS_PER_GRID * THREADS_PER_BLOCK];
-				cudaMallocManaged(&tab, sizeof(double) * BLOCKS_PER_GRID * THREADS_PER_BLOCK);
-				for(unsigned i=0;i<BLOCKS_PER_GRID * THREADS_PER_BLOCK; i++) tab[i] = 0.0;
+				cudaMallocManaged(&tab, sizeof(double) * tempBLOCKS_PER_GRID * tempTHREADS_PER_BLOCK);
+				for(unsigned i=0;i<tempBLOCKS_PER_GRID * tempTHREADS_PER_BLOCK; i++) tab[i] = 0.0;
 				double w = 0.0;
 
 				//poczatek mierzenia czasu wliczajac alokacja pamieci
 				//high_resolution_clock::time_point tbk = high_resolution_clock::now();
 
-				detHelper<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(d_1, tab);
-				cudaDeviceSynchronize();
-				for(unsigned i=0;i<BLOCKS_PER_GRID*THREADS_PER_BLOCK; i++){
-					w += tab[i];	
+				if(matrix1.getColumns()>1){
+					detHelper<<<tempBLOCKS_PER_GRID, tempTHREADS_PER_BLOCK>>>(d_1, tab);
+					cudaDeviceSynchronize();
+					for(unsigned i=0;i<tempBLOCKS_PER_GRID*tempTHREADS_PER_BLOCK; i++){
+						w += tab[i];	
+					}
 				}
+				//w przeciwnym wypadku wyznacznikiem jest jedyny element macierzy
+				else w = *((double*)((unsigned*)d_1+2));
+
 
 				double mainDet = w;
 
@@ -1200,63 +1286,96 @@ int main(){
 					printf("Wyznacznik macierzy rowny 0.0 - macierz odwrotna nie istnieje!");
 				}
 				else{
-					//why?
 					*(unsigned*)d_r = matrix1.getRows();
 					*((unsigned*)d_r+1) = matrix1.getColumns();
-					//Tworzymy bufor na minora:
-					void* minor = NULL;
-					cudaMallocManaged(&minor, 2*sizeof(unsigned)+(matrix1.getRows()-1)*(matrix1.getColumns()-1)*sizeof(double));
-
-					//przekopiowanie	
-					*(unsigned*)minor = matrix1.getRows()-1;
-					*((unsigned*)minor+1) = matrix1.getColumns()-1;
-
-					//debug
-					printf("Udalo sie tu dojsc!\n");
-					printMatrixGPU("%f ",minor);
-
-
-					for(unsigned i=0; i<matrix1.getRows(); i++){
-						for(unsigned j=0; j<matrix1.getColumns(); j++){
-							//zerujemy tab i w
-							for(unsigned q=0;q<BLOCKS_PER_GRID * THREADS_PER_BLOCK; q++) tab[q] = 0.0;
-							w = 0.0;
-							for(unsigned q=0;q<matrix1.getRows(); q++){
-								for(unsigned k=0;k<matrix1.getRows(); k++){
-									if(q<i && k<j) *((double*)((unsigned*)minor+2)+q*(matrix1.getColumns()-1)+k) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
-									if(q<i && k>j) *((double*)((unsigned*)minor+2)+q*(matrix1.getColumns()-1)+k-1) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
-									if(q>i && k<j) *((double*)((unsigned*)minor+2)+(q-1)*(matrix1.getColumns()-1)+k) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
-									if(q>i && k>j) *((double*)((unsigned*)minor+2)+(q-1)*(matrix1.getColumns()-1)+k-1) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
-
-								}	
-							}	
-
-							if(i==0 && j==0){
-							//debug
-							printf("Udalo sie tu dojsc!\n");
-							printMatrixGPU("%f ",minor);
-							}
-
-							//kernel
-							detHelper<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(minor, tab);
-							cudaDeviceSynchronize();
-
-							for(unsigned q=0;q<BLOCKS_PER_GRID*THREADS_PER_BLOCK; q++){
-								w += tab[q];	
-							}
-						
-							if(i==0 && j==0){
-								printf("%f", w);
-							}
-
-							*((double*)((unsigned*)d_r+2)+j*matrix1.getColumns()+i) = (((i%2)+(j%2))%2==0?1.0:-1.0) * w / mainDet;
-
-						}
+					if(matrix1.getRows()==1){
+						*((double*)((unsigned*)d_r+2)) = 1.0/mainDet;
 					}
-					
-					cudaFree(minor);
+					else if(matrix1.getRows()>1){
+						//Tworzymy bufor na minora:
+						void* minor = NULL;
+						cudaMallocManaged(&minor, 2*sizeof(unsigned)+(matrix1.getRows()-1)*(matrix1.getColumns()-1)*sizeof(double));
 
+						//przekopiowanie	
+						*(unsigned*)minor = matrix1.getRows()-1;
+						*((unsigned*)minor+1) = matrix1.getColumns()-1;
 
+						//debug
+						/*
+						printf("Udalo sie tu dojsc!\n");
+						printMatrixGPU("%f ",minor);
+						*/
+
+						for(unsigned i=0; i<matrix1.getRows(); i++){
+							for(unsigned j=0; j<matrix1.getColumns(); j++){
+								//zerujemy tab i w
+								for(unsigned q=0;q<tempBLOCKS_PER_GRID * tempTHREADS_PER_BLOCK; q++) tab[q] = 0.0;
+								w = 0.0;
+								for(unsigned q=0;q<matrix1.getRows(); q++){
+									for(unsigned k=0;k<matrix1.getRows(); k++){
+										if(q<i && k<j) *((double*)((unsigned*)minor+2)+q*(matrix1.getColumns()-1)+k) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
+										if(q<i && k>j) *((double*)((unsigned*)minor+2)+q*(matrix1.getColumns()-1)+k-1) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
+										if(q>i && k<j) *((double*)((unsigned*)minor+2)+(q-1)*(matrix1.getColumns()-1)+k) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
+										if(q>i && k>j) *((double*)((unsigned*)minor+2)+(q-1)*(matrix1.getColumns()-1)+k-1) = *((double*)((unsigned*)d_1+2) + q*matrix1.getColumns() + k);
+
+									}	
+								}	
+
+								unsigned temp2BLOCKS_PER_GRID = BLOCKS_PER_GRID;
+								unsigned temp2THREADS_PER_BLOCK = THREADS_PER_BLOCK;
+
+								switch(matrix1.getRows()-1){
+									case 1:
+									temp2BLOCKS_PER_GRID=1;
+									temp2THREADS_PER_BLOCK=1;
+									break;
+									case 2:
+									temp2BLOCKS_PER_GRID=1;
+									temp2THREADS_PER_BLOCK=1;
+									break;
+									case 3:
+									temp2BLOCKS_PER_GRID=2;
+									temp2THREADS_PER_BLOCK=2;
+									break;
+									case 4:
+									temp2BLOCKS_PER_GRID=4;
+									temp2THREADS_PER_BLOCK=4;
+									break;
+									case 5:
+									temp2BLOCKS_PER_GRID=4;
+									temp2THREADS_PER_BLOCK=16;
+									break;
+									case 6:
+									temp2BLOCKS_PER_GRID=8;
+									temp2THREADS_PER_BLOCK=64;
+									break;
+									default:
+									temp2BLOCKS_PER_GRID = BLOCKS_PER_GRID;
+									temp2THREADS_PER_BLOCK = THREADS_PER_BLOCK;
+								}
+
+								if(matrix1.getColumns()-1>1){
+
+									//kernel
+									detHelper<<<temp2BLOCKS_PER_GRID, temp2THREADS_PER_BLOCK>>>(minor, tab);
+									cudaDeviceSynchronize();
+
+									for(unsigned q=0;q<temp2BLOCKS_PER_GRID*temp2THREADS_PER_BLOCK; q++){
+										w += tab[q];	
+									}
+								}
+
+								else w = *((double*)((unsigned*)minor+2));
+
+								
+								*((double*)((unsigned*)d_r+2)+j*matrix1.getColumns()+i) = (((i%2)+(j%2))%2==0?1.0:-1.0) * w / mainDet;
+
+							}
+						}
+						
+						cudaFree(minor);
+
+					}
 					//koniec mierzenia czasu
 					high_resolution_clock::time_point tk = high_resolution_clock::now();
 
@@ -1279,7 +1398,7 @@ int main(){
 				cudaFree(d_r);
 				cudaFree(d_1);
 
-				if(mainDet != 0 && mainDet != 0){
+				if(mainDet != 0.0 && mainDet != -0.0){
 
 					try{
 						//poczatek pomiaru czasu na CPU
