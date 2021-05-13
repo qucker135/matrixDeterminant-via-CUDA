@@ -137,17 +137,7 @@ public:
 			}
 		}
 	}
-	/*
-	Matrix& operator=(const Matrix& m){
-		this->setSize(m.getRows(),m.getColumns());
-		for(unsigned i=0;i<m.getRows();i++){
-			for(unsigned j=0;j<m.getColumns();j++){
-				this->set(i,j,m.get(i,j));
-			}
-		}
-		return &m;
-	}
-	*/
+	
 
 };
 
@@ -161,8 +151,8 @@ void printMatrixCPU(const char* format, const Matrix& matrix){
 }
 void printMatrixGPU(const char* format, void* matrix){
 	//debug
-	printf("%d\n",*(unsigned*)matrix);
-	printf("%d\n",*((unsigned*)matrix+1));
+	//printf("%d\n",*(unsigned*)matrix);
+	//printf("%d\n",*((unsigned*)matrix+1));
 	
 	for(unsigned i=0; i<*(unsigned*)matrix; i++){  //wartosc *(unsigned*)matrix przechowuje liczbe wierszy
 		for(unsigned j=0; j<*((unsigned*)matrix+1); j++){ //wartosc *(unsigned*)matrix+1 przechowuje liczbe kolumn
@@ -211,8 +201,6 @@ void mul(void* matrix1, void* matrix2, void* result){
 	}
 }
 
-
-//BLOCKS_PER_GRID * THREADS_PER_BLOCK >= N!
 
 __global__
 void detHelper(void* matrix, double* tab_helper/*, unsigned N*/){
@@ -264,11 +252,7 @@ void detHelper(void* matrix, double* tab_helper/*, unsigned N*/){
 
 			for(int i=0;i<N;i++) product*= *(((double*)((unsigned*)matrix+2))+i*N+(idxTab[i]-1));//element z i-tego wiersza i (idxTab[i]-1) kolumny
 
-			//product*=M[i*N+(idxTab[i]-1)+1]; //here we have a product, one of N!
-
 			tab_helper[idx] += product;
-
-			//printf("%lf\n",tab_helper[idx]);
 
 			//konwersja odwrotna (przywrocenie numeru indexu)
 			for(int i=0;i<N;i++){
@@ -294,52 +278,6 @@ void detHelper(void* matrix, double* tab_helper/*, unsigned N*/){
 	delete[] idxTab;
 }
 
-//do usuniecia
-/*
-void det(void* matrix, double* tab_helper, double* wsk){ //tab_helper - tablica czastkowych wynikow z pracy wszystkich watkow, wsk - wynik koncowy
-	//pobranie wymiarow macierzy
-	unsigned M = *(unsigned*)matrix;
-	unsigned N = *((unsigned*)matrix+1);
-	//jesli macierz nie jest kwadratowa, rzuc wyjatkiem:
-	if(M!=N) throw "Macierz niekwadratowa";
-	detHelper<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(matrix, tab_helper, N);
-	cudaDeviceSynchronize();
-	(*wsk)=0.0;// do usuniecia
-	//debug
-	for(unsigned i=0;i<BLOCKS_PER_GRID*THREADS_PER_BLOCK;i++) printf("%f ",tab_helper[i]);
-	for(unsigned i=0;i<BLOCKS_PER_GRID*THREADS_PER_BLOCK;i++) *wsk+=tab_helper[i];
-}
-*/
-
-//do usuniecia
-/*
-__global__
-void add(void* matrix1, void* matrix2, void* prod, int M, int N){
-		const int tidx = blockDim.x * blockIdx.x + threadIdx.x;
-		const int tidy = blockDim.y * blockIdx.y + threadIdx.y;
-
-		if(tidx<M && tidy<N){
-		*(((double*)(unsigned*)prod+2)+tidx + tidy*N ) = *(((double*)(unsigned*)matrix1+2)+tidx + tidy*N ) + *(((double*)(unsigned*)matrix2+2)+tidx + tidy*N );
-		}
-}
-
-
-//do usuniecia
-
-__global__
-void mull(void* A, void* B, void* C, int N) {
-
-  int col = blockIdx.x * blockDim.x + threadIdx.x;
-	int row = blockIdx.y * blockDim.y + threadIdx.y;
-	double sum = 0;
-	if (row < N && col < N) {
-		for (int i = 0; i < N; i++){
-		 sum += *(((double*)(unsigned*)A+2)+row*N+i) * *(((double*)(unsigned*)B+2)+i*N+col);
-		}
-		*(((double*)(unsigned*)C+2)+row*N+col) = sum;
-	}
-}
-*/
 
 
 void loadMatrixFromFile(Matrix & matrix) {
@@ -369,7 +307,6 @@ void loadMatrixFromFile(Matrix & matrix) {
 			}
 
 		myfile.close();
-		//printMatrixCPU("%.1f ", matrix);
 	}
 }
 
@@ -390,470 +327,12 @@ void saveMatrixToFile(Matrix& matrixInt) {
 	myfile.close();
 }
 
-//do konsultacji, i prawdopodobnie usuniecia (bo mamy copyMatrixToGPU)
-/*
-void executeAdding(Matrix matrix1, Matrix matrix2){
-	//Pamięć potrzebna do przechowania macierzy
-		size_t sizeOfMatrix1 = sizeof(matrix1) + matrix1.getRows() * matrix1.getColumns() * sizeof(double);
-		size_t sizeOfMatrix2 = sizeof(matrix2) + matrix2.getRows() * matrix2.getColumns() * sizeof(double);
 
-		//host pointers
-		void* h_ptr_matrixInt = malloc(sizeOfMatrix1);
-		void* h_ptr_matrixInt2 = malloc(sizeOfMatrix2);
-		void* h_ptr_product = malloc(sizeOfMatrix1);
 
-		//zapisanie macierzy w postaci przystępnej dla GPU
-		copyMatrixToGPU(h_ptr_matrixInt, matrix1);
-		copyMatrixToGPU(h_ptr_matrixInt2, matrix2);
-
-		//device pointers
-		void* d_ptr_matrixInt;
-		void* d_ptr_matrixInt2;
-		void* d_ptr_product;
-
-		cudaMalloc(&d_ptr_matrixInt, sizeOfMatrix1);
-		cudaMalloc(&d_ptr_matrixInt2, sizeOfMatrix1);
-		cudaMalloc(&d_ptr_product, sizeOfMatrix1);
-
-		cudaMemcpy(d_ptr_matrixInt, h_ptr_matrixInt, sizeOfMatrix1, cudaMemcpyHostToDevice);
-		cudaMemcpy(d_ptr_matrixInt2, h_ptr_matrixInt2, sizeOfMatrix1, cudaMemcpyHostToDevice);
-
-		const size_t BLOCK_DIM = 16;
-		dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);
-		dim3 dimGrid((int)ceil((double)matrix1.getColumns()/dimBlock.x),(int)ceil((double)matrix1.getRows()/dimBlock.y));
-		add<<<dimGrid, dimBlock>>>(d_ptr_matrixInt, d_ptr_matrixInt2, d_ptr_product, matrix1.getRows(), matrix1.getColumns());
-		cudaMemcpy(h_ptr_product, d_ptr_product, sizeOfMatrix1, cudaMemcpyDeviceToHost);
-
-		*(unsigned*)h_ptr_product = matrix1.getRows();
-		*((unsigned*)h_ptr_product+1) = matrix1.getColumns();
-		printf("%u \n",*((unsigned*)h_ptr_product+1));
-		printMatrixGPU("%.1lf ", h_ptr_matrixInt);
-		printf("\n\n");
-		printMatrixGPU("%.1lf ", h_ptr_matrixInt2);
-			printf("\n\n");
-		printMatrixGPU("%.1lf ", h_ptr_product);
-		cudaFree(d_ptr_matrixInt);
-		cudaFree(d_ptr_matrixInt2);
-		cudaFree(d_ptr_product);
-
-		free(h_ptr_matrixInt);
-		free(h_ptr_matrixInt2);
-		free(h_ptr_product);
-}
-*/
-
-//do konsultacji i prawdopodobnie usuniecia (bo mamy copyMatrixToGPU)
-
-/*
-void executeMultiplying(Matrix matrix1, Matrix matrix2){
-		Matrix prodHost = matrix1*matrix2;
-		printMatrixCPU("%.1lf ", prodHost);
-
-		Matrix productMatrix(matrix1.getRows(), matrix1.getColumns());
-	//Pamięć potrzebna do przechowania macierzy
-		size_t sizeOfMatrix1 = sizeof(matrix1) + matrix1.getRows() * matrix1.getColumns() * sizeof(double);
-		size_t sizeOfMatrix2 = sizeof(matrix2) + matrix2.getRows() * matrix2.getColumns() * sizeof(double);
-		size_t sizeOfProdMatrix = sizeof(matrix2) + productMatrix.getRows() * productMatrix.getColumns() * sizeof(double);
-
-		//host pointers
-		void* h_ptr_matrix1 = malloc(sizeOfMatrix1);
-		void* h_ptr_matrix2 = malloc(sizeOfMatrix2);
-		void* h_ptr_product = malloc(sizeOfProdMatrix);
-
-		//zapisanie macierzy w postaci przystępnej dla GPU
-		copyMatrixToGPU(h_ptr_matrix1, matrix1);
-		copyMatrixToGPU(h_ptr_matrix2, matrix2);
-
-		//device pointers
-		void* d_ptr_matrix1;
-		void* d_ptr_matrix2;
-		void* d_ptr_product;
-
-		cudaMalloc(&d_ptr_matrix1, sizeOfMatrix1);
-		cudaMalloc(&d_ptr_matrix2, sizeOfMatrix2);
-		cudaMalloc(&d_ptr_product, sizeOfProdMatrix);
-
-		cudaMemcpy(d_ptr_matrix1, h_ptr_matrix1, sizeOfMatrix1, cudaMemcpyHostToDevice);
-		cudaMemcpy(d_ptr_matrix2, h_ptr_matrix2, sizeOfMatrix2, cudaMemcpyHostToDevice);
-
-		const size_t BLOCK_DIM = 16;
-		dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);
-		dim3 dimGrid((int)ceil((double)matrix1.getRows()/dimBlock.x),(int)ceil((double)matrix1.getColumns()/dimBlock.y));
-
-		int Arows = matrix1.getRows();
-		// int Acols = matrix1.getColumns();
-		// int Brows = matrix2.getRows();
-		// int Bcols = matrix2.getColumns();
-		// int Prows = productMatrix.getRows();
-		// int Pcols = productMatrix.getColumns();
-		mull<<<dimGrid, dimBlock>>>(d_ptr_matrix1, d_ptr_matrix2, d_ptr_product, Arows);
-		cudaMemcpy(h_ptr_product, d_ptr_product, sizeOfProdMatrix, cudaMemcpyDeviceToHost);
-
-		*(unsigned*)h_ptr_product = matrix1.getRows();
-		*((unsigned*)h_ptr_product+1) = matrix1.getColumns();
-
-		printf("%u \n",*((unsigned*)h_ptr_product+1));
-		printMatrixGPU("%.1lf ", h_ptr_matrix1);
-		printf("\n\n");
-		printMatrixGPU("%.1lf ", h_ptr_matrix2);
-			printf("\n\n");
-		printMatrixGPU("%.1lf ", h_ptr_product);
-		cudaFree(d_ptr_matrix1);
-		cudaFree(d_ptr_matrix2);
-		cudaFree(d_ptr_product);
-
-		free(h_ptr_matrix1);
-		free(h_ptr_matrix2);
-		free(h_ptr_product);
-}
-*/
-
-/*
-void startMenu() {
-	//reserve matrix of ints
-	const unsigned M = 3; //test values
-	const unsigned N = 3;
-	Matrix matrix1(M,N);
- 	Matrix matrix2(M,N);
-
-	for(int i = 0 ;i<M;i++){
-		for(int j = 0 ; j<N ; j++){
-			matrix1.set(i,j,i);
-		}
-	}
-	for(int i = 0 ;i<M;i++){
-		for(int j = 0 ; j<N ; j++){
-			matrix2.set(i,j,j);
-		}
-	}
-	int x = 11;
-	while (x != 0)
-	{
-		printf( "*******************MENU********************\n");
-		printf("1.Wczytaj macierz z pliku\n");
-		printf("2.Zapisz macierz do pliku\n");
-		printf("3.Wyznacznik\n");
-		printf("4.Dodaj macierze\n");
-		printf("5.Przemnóż macierze\n");
-		printf("6.Macierz odwrotna\n");
-    		printf("0.Wyjdź\n");
-
-		printf("Wybieram : \n");
-		scanf("%d", &x);
-		system("clear");
-
-    		int subselect= 0;
-		switch (x){
-		case 1: //ladowanie
-			printf("1 - Macierz 1\n2 - Macierz 2\n");
-			scanf("%d", &subselect);
-			subselect==1?loadMatrixFromFile(matrix1):loadMatrixFromFile(matrix2);
-		break;
-		case 2: //zapisywanie
-			printf("1 - Macierz 1\n2 - Macierz 2\n");
-			scanf("%d", &subselect);
-			subselect==1?saveMatrixToFile(matrix1):saveMatrixToFile(matrix2);
-		break;
-		case 3: //wyznacznik
-		//	detOfMatrix(matrixInt);
-			break;
-		case 4: //dodawanie
-			if(matrix1.getRows() != matrix2.getRows() || matrix1.getColumns()!=matrix2.getColumns()){
-				printf("Macierze różnych rozmiarów!\n");
-			}
-			//else executeAdding(matrix1, matrix2);
-		break;
-		case 5: //mnozenie
-			if(matrix1.getColumns() != matrix2.getRows()){
-				printf("\n");
-				break;
-			}
-			//else executeMultiplying(matrix1, matrix2);
-		break;
-    		case 6: //macierz odwrotna
-
-      		break;
-    		case 0: //wyjscie
-      			exit(0);
-    		default:
-      		break;
-
-		}
-	}
-}
-*/
 
 using namespace std::chrono;
 
 int main(){
-
-	// 	Matrix test(3,3);
-// 	for(int i = 0 ;i<test.getRows();i++){
-// 		for(int j=0; j< test.getColumns(); j++){
-// 			test.set(i,j,i*2+j+1);
-// 		}
-// 	}
-// void* pointerToTest;
-// void* d_pointerToTest;
-// pointerToTest = malloc(9*sizeof(double)+2*sizeof(unsigned));
-//
-// 	copyMatrixToGPU(pointerToTest, test);
-// 	printMatrixGPU("%.1lf ", pointerToTest);
-//
-// 	cudaMalloc(&d_pointerToTest, 9*sizeof(double)+2*sizeof(unsigned));
-//
-// 	cudaMemcpy(d_pointerToTest, pointerToTest, 9*sizeof(double)+2*sizeof(unsigned), cudaMemcpyHostToDevice);
-//
-// 	const size_t BLOCK_DIM = 16;
-// 	dim3 dimBlock(BLOCK_DIM, BLOCK_DIM);
-// 	dim3 dimGrid((int)ceil((double)test.getRows()/dimBlock.x),(int)ceil((double)test.getColumns()/dimBlock.y));
-//
-// 	double* tab_helper = new double[9];
-// 	detHelper<<<dimGrid, dimBlock>>>(d_pointerToTest, tab_helper, 3);
-// 	cudaDeviceSynchronize();
-
-
-
-
-
-	/*
-	double* tab;// = new int[BLOCKS_PER_GRID*THREADS_PER_BLOCK];
-	unsigned N =10;
-		 high_resolution_clock::time_point t11 = high_resolution_clock::now();
-		cudaMallocManaged(&tab, sizeof(double)*BLOCKS_PER_GRID*THREADS_PER_BLOCK);
-		for(int i=0;i<BLOCKS_PER_GRID*THREADS_PER_BLOCK;i++) tab[i] = 0;
-
-		void* A;
-
-		cudaMallocManaged(&A, (N*N)*sizeof(double)+2*sizeof(unsigned));
-
-		*(unsigned*)A = N;
-		*((unsigned*)A+1)  = N;
-
-		for(int i=0;i<*(unsigned*)A;i++){
-			for(int j=0;j<*(unsigned*)A ;j++){
-				*((double*)((unsigned*)A+2)+i*N+j) = ((i==j) ? 3.0 : 2.0);//rand()%21-10;
-			}
-		}
-		double* w = new double;
-		 *w = 0;
-		detHelper<<<BLOCKS_PER_GRID,THREADS_PER_BLOCK>>>(A,tab,N);
-		cudaDeviceSynchronize();
-		high_resolution_clock::time_point t22 = high_resolution_clock::now();
-
-	  duration<double> time_span1 = duration_cast<duration<double>>(t22 - t11);
-
-	  std::cout << "It took me " << time_span1.count() << " seconds.";
-	  std::cout << std::endl;
-
-
-
-		Matrix test(N,N);
-		for(int i = 0 ;i< N; i++){
-			for(int j =0 ; j<N;j++){
-				test.set(i,j,(i==j) ? 3.0 : 2.0);
-			}
-		}
-
- 		 high_resolution_clock::time_point t1 = high_resolution_clock::now();
-		 test.det();
-		 high_resolution_clock::time_point t2 = high_resolution_clock::now();
-
-		 duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
-
-		 std::cout << "(host)It took me " << time_span.count() << " seconds.";
-		 std::cout << std::endl;
-
-		for(int i=0;i<BLOCKS_PER_GRID*THREADS_PER_BLOCK;i++) (*w)+=tab[i];
-		printf("%lf\n",*w);
-
-		cudaFree(A);
-		cudaFree(tab);
-		delete w;
-	*/
-	/*
-	const unsigned Ma = 2;
-	const unsigned Na = 3;
-	Matrix A(Ma,Na);
-	for(unsigned i=0;i<M;i++){
-		for(unsigned j=0;j<N;j++){
-			A.set(i,j,M-i);	
-		}
-	}
-	A.set(0,0,53);
-	A.set(0,1,-3);
-	A.set(0,2,2.5);
-	//A.set(0,3,1.3);
-	//A.set(0,4,1.2);
-	A.set(1,0,-53);
-	A.set(1,1,4);
-	A.set(1,2,1.5);
-	//A.set(1,3,0.3);
-	//A.set(1,4,-1.2);
-
-	const unsigned Mb = Na;
-	const unsigned Nb = 5;
-
-	Matrix B(Mb,Nb);
-	for(unsigned i=0;i<M;i++){
-		for(unsigned j=0;j<N;j++){
-			B.set(i,j,N-j);	
-		}
-	}
-
-	B.set(0,0,17);
-	B.set(0,1,15);
-	B.set(0,2,2.5);
-	B.set(0,3,0.3);
-	B.set(0,4,0.2);
-	B.set(1,0,-5);
-	B.set(1,1,4.1);
-	B.set(1,2,2.5);
-	B.set(1,3,1.3);
-	B.set(1,4,-0.2);
-	B.set(2,0,-1);
-	B.set(2,1,41);
-	B.set(2,2,25);
-	B.set(2,3,13);
-	B.set(2,4,0.2);
-
-
-	printMatrixCPU("%.1f ",A);
-	printf("\n");
-	printMatrixCPU("%.1f ",B);
-	printf("\n");
-
-	if(A.getColumns() != B.getRows()){
-		throw "Nierówne wymiary macierzy!!";
-	}
-
-
-	void* d_A = NULL;
-	void* d_B = NULL;
-	void* result = NULL;
-
-	
-	cudaMallocManaged(&d_A, 2*sizeof(unsigned)+Ma*Na*sizeof(double));
-	cudaMallocManaged(&d_B, 2*sizeof(unsigned)+Mb*Nb*sizeof(double));
-	cudaMallocManaged(&result,  2*sizeof(unsigned)+Ma*Nb*sizeof(double));
-	
-	copyMatrixToGPU(d_A, A);
-	copyMatrixToGPU(d_B, B);
-	
-	printf("Przed:\n");
-	printMatrixGPU("%.1f ", d_A);
-	printf("\n");
-	printMatrixGPU("%.1f ", d_B);
-	printf("\n");
-
-
-	*(unsigned*)result = *(unsigned*)d_A;
-	*((unsigned*)result+1) = *((unsigned*)d_B+1); 
-	mul<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(d_A, d_B, result);
-	cudaDeviceSynchronize();
-	
-	printf("Po:\n");
-	
-
-	printMatrixGPU("%.1f ", d_A);
-	printf("\n");
-	printMatrixGPU("%.1f ", d_B);
-	printf("\n");
-	printMatrixGPU("%.2f ", result);
-	printf("\n");
-
-
-
-
-	cudaFree(d_A);
-	cudaFree(d_B);
-	cudaFree(result);*/
-
- // startMenu();
- //  const unsigned M = 3; //test values
- //  const unsigned N = 3;
- //  Matrix matrix1(M, N);
- //  Matrix matrix2(M, N);
- //
-	// //test values
- //  for(unsigned i=0; i<M; i++){
- //  	for(unsigned j=0; j<N; j++){
- //  		matrix1.set(i, j, (double)2*i+j);
- //  	}
- //  }
- //  for(unsigned i=0; i<M; i++){
- //  	for(unsigned j=0; j<N; j++){
- //  		matrix2.set(i, j, (double)2*i+j);
- //  	}
- //  }
- //
-	// 	size_t sizeOfMatrix1 = sizeof(matrix1) + matrix1.getRows() * matrix1.getColumns() * sizeof(double);
-	// 	size_t sizeOfMatrix2 = sizeof(matrix2) + matrix2.getRows() * matrix2.getColumns() * sizeof(double);
-	//  //host pointers
- //   void* h_ptr_matrixInt = malloc(sizeOfMatrix1);
- //   void* h_ptr_matrixInt2 = malloc(sizeOfMatrix2);
- //   void* h_ptr_product = malloc(sizeOfMatrix1);
- //
- //
-
-	//srand(time(NULL));
-	//reserve matrix of ints
-	// const unsigned M = 3; //test values
-	// const unsigned N = 3;
-	// Matrix A(M,N);
-	// for(unsigned i=0; i<M; i++){
-	// 	for(unsigned j=0; j<N; j++){
-	// 		A.set(i, j, (double)2*i+j);
-	// 	}
-	// }
-	// printMatrixCPU("%.1f ", A);
-	// Matrix B(M,N);
-	// for(unsigned i=0; i<M; i++){
-	// 	for(unsigned j=0; j<N; j++){
-	// 		B.set(i, j, (double)2*i+j);
-	// 	}
-	// }
-	// printMatrixCPU("%.1f ", B);
-	// Matrix C = A+B;
-	// printMatrixCPU("%.1f ", C);
-	// Matrix D = A*B;
-	// printMatrixCPU("%.1f ", D);
-	// printf("%.1f \n", D.det());
-	// printf("%.1f \n", A.det());
-	// Matrix E(M,N);
-	// E.set(0,0,1.0);
-	// E.set(0,1,-1.0);
-	// E.set(0,2,2.0);
-	// E.set(1,0,3.0);
-	// E.set(1,1,0.0);
-	// E.set(1,2,-4.0);
-	// E.set(2,0,2.0);
-	// E.set(2,1,3.0);
-	// E.set(2,2,5.0);
-	/*for(unsigned i=0; i<M; i++){
-		for(unsigned j=0; j<N; j++){
-			E.set(i, j, (double)(j*j*j+i));
-		}
-	}*/
-	// printMatrixCPU("%.1f ", E);
-	// printf("%.1f \n", E.det());
-	// Matrix F = E.inverse();
-	// printMatrixCPU("%.8f ", F);
-
-
-	// copyMatrixToGPU("%.1f ", d_ptr_matrixInt, matrixInt);
-	// printMatrixGPU("%.1f ", d_ptr_matrixInt);
-	// double* w = new double; (*w)=0.0;
-	// double* partial_sums = new double[THREADS_PER_BLOCK*BLOCKS_PER_GRID];
-	// for(unsigned i=0; i<THREADS_PER_BLOCK*BLOCKS_PER_GRID; i++) partial_sums[i] = 0.0;
-	// det(d_ptr_matrixInt, partial_sums, w);
-	// printf("%.1f\n", *w);
-	// delete[] partial_sums;
-	// delete w;
-	// cudaFree(d_ptr_matrixInt);
-
-	//reserve matrix of ints
-	
 	const unsigned M = 3; //test values
 	const unsigned N = 3;
 	Matrix matrix1(M,N);
@@ -879,26 +358,7 @@ int main(){
 		}
 	}
 
-	//testowe wywolanie w mainie	
-	/*	
-	void* d_test = NULL;
-	cudaMallocManaged(&d_test, 2*sizeof(unsigned)+matrix1.getRows()*matrix1.getColumns()*sizeof(double));
-	copyMatrixToGPU(d_test, matrix1);
-	double* tab_test = new double[BLOCKS_PER_GRID * THREADS_PER_BLOCK];
-	for(unsigned i=0;i<BLOCKS_PER_GRID * THREADS_PER_BLOCK; i++) tab_test[i] = 0.0;
-	double* w_test = new double; *w_test = 0.0;
-	detHelper<<<BLOCKS_PER_GRID, THREADS_PER_BLOCK>>>(d_test, tab_test);
-	cudaDeviceSynchronize();
-	for(unsigned i=0;i<BLOCKS_PER_GRID*THREADS_PER_BLOCK; i++){
-		*w_test += tab_test[i];	
-	}
-	printf("%f", *w_test);
-
-	cudaFree(d_test);
-	delete[] tab_test;
-	delete w_test;
-	*/
-
+	
 	int x = 11;
 	while (x != 0)
 	{
@@ -1300,12 +760,7 @@ int main(){
 						*(unsigned*)minor = matrix1.getRows()-1;
 						*((unsigned*)minor+1) = matrix1.getColumns()-1;
 
-						//debug
-						/*
-						printf("Udalo sie tu dojsc!\n");
-						printMatrixGPU("%f ",minor);
-						*/
-
+						
 						for(unsigned i=0; i<matrix1.getRows(); i++){
 							for(unsigned j=0; j<matrix1.getColumns(); j++){
 								//zerujemy tab i w
@@ -1436,11 +891,5 @@ int main(){
 		}
 	}
 	
-	/*
-	Matrix a(2,5);
-	Matrix b = a;
-	printMatrixCPU("%.1f ",a);
-	printMatrixCPU("%.1f ",b);
-	*/
 	return 0;
 }
